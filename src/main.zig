@@ -5,11 +5,15 @@ const fs = std.fs;
 
 pub const log_level: std.log.Level = .debug;
 pub const scope_levels = [_]std.log.ScopeLevel{
+    .{ .scope = .crfl, .level = .debug },
     .{ .scope = .config, .level = .info },
     .{ .scope = .verbose, .level = .info },
+    .{ .scope = .sout, .level = .err },
 };
+const thisLog = std.log.scoped(.crlf);
 const configLog  = std.log.scoped(.config);
 const verboseLog = std.log.scoped(.verbose);
+const soutLog = std.log.scoped(.sout);
 
 pub fn log(
     comptime level: std.log.Level,
@@ -60,14 +64,14 @@ const Action = enum { noop, toCRLF, toLF,
 
 pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer serr("leaked: {}", .{ gpa.deinit() });
+    defer thisLog.debug("leaked: {}", .{ gpa.deinit() });
     const malloc = gpa.allocator();
 
     const argv = try getArgv(malloc);
     defer malloc.free(argv);
 
     if ( argv.len <= 1 ) {
-        sout("warning: no arguments", .{});
+        thisLog.warn("no arguments", .{});
         os.exit(0);
     }
 
@@ -92,7 +96,7 @@ pub fn main() anyerror!void {
             flags.mk_backup = true
         else if ( std.mem.eql(u8, arg, "--verbose") )
             flags.verbose = true
-        else sout("warning: unused argument [{d}]: {s}", .{ i, arg });
+        else thisLog.warn("unused argument [{d}]: {s}", .{ i, arg });
     }
 
     if ( help ) {
@@ -102,6 +106,7 @@ pub fn main() anyerror!void {
 
     if ( flags.verbose ) {
         configLog.info("target-file: {s}", .{ input_file_name });
+        configLog.info("action: {s}", .{ action });
         flags.status(configLog);
     }
 
@@ -113,7 +118,10 @@ pub fn main() anyerror!void {
                 try doAction(action, cwd, input_file_name, malloc);
                 os.exit(0);
             },
-            else => return err,
+            else => {
+                thisLog.err("unhandled error: {s}", .{ err });
+                return;
+            },
     };
     defer dir.close();
 
@@ -172,7 +180,8 @@ fn actOnTemp(action: Action, dir: fs.Dir,
             alloc: std.mem.Allocator) !void {
     const fin = dir.openFile(input_file_name, .{ .read = true }) catch
         |err| {
-            serr("Couldn't open file {s}: {s}", .{ input_file_name, err });
+            thisLog.err("Couldn't open file {s}: {s}",
+                .{ input_file_name, err });
             os.exit(1);
     };
     defer fin.close();
@@ -183,7 +192,7 @@ fn actOnTemp(action: Action, dir: fs.Dir,
             error.PathAlreadyExists => {
                 const realpath = try dir.realpathAlloc(alloc, temp_file_name);
                 defer alloc.free(realpath);
-                serr("{s}: already exists.\n" ++
+                thisLog.warn("{s}: already exists.\n" ++
                     "If you are sure that nobody is using this file. " ++
                     "Consider deleating `{s}` and try again.",
                     .{ realpath, temp_file_name });
@@ -238,7 +247,7 @@ fn actOnBuffer(action: Action, lastc: ?u8, isLastBuffer: bool,
     const limit = if (isLastBuffer) buffer.len else buffer.len - 1;
 
     if ( debugging )
-        sout("DEBUG: limit={d} len={d}\n\n", .{ limit, buffer.len });
+        thisLog.debug("DEBUG: limit={d} len={d}\n\n", .{ limit, buffer.len });
     while ( last_i < limit ) : ( i += 1 ) {
         var stop = false;
         while ( i < buffer.len and !stop ) : ( i += 1 ) {
@@ -249,7 +258,7 @@ fn actOnBuffer(action: Action, lastc: ?u8, isLastBuffer: bool,
                 .toLF => buffer[i] == '\r',
             };
             if ( debugging )
-                sout(">>> i={d} c=({x:0>2})" ++
+                thisLog.debug(">>> i={d} c=({x:0>2})" ++
                     "buffer[i]=({x:0>2}) write=\"{s}\"\n",
                     .{ i, c, buffer[i], buffer[last_i..i] });
             c = buffer[i];
@@ -257,8 +266,8 @@ fn actOnBuffer(action: Action, lastc: ?u8, isLastBuffer: bool,
         if ( stop ) i -= 1;
 
         if ( debugging ) {
-            sout("\nDEBUG: last_i={d} i={d}\n", .{ last_i, i });
-            sout("....write=\"{s}\" buffer[i]={c}({d})\n", .{
+            thisLog.debug("\nDEBUG: last_i={d} i={d}\n", .{ last_i, i });
+            thisLog.debug("....write=\"{s}\" buffer[i]={c}({d})\n", .{
                 buffer[last_i..i],
                 if (stop) buffer[i] else '1',
                 if (stop) buffer[i] else '1',
@@ -275,7 +284,7 @@ fn actOnBuffer(action: Action, lastc: ?u8, isLastBuffer: bool,
                 last_i = if ( stop ) i + 1 else i,
         }
 
-        if ( debugging ) sout("----------\n", .{});
+        if ( debugging ) thisLog.debug("----------\n", .{});
     }
 }
 
@@ -331,14 +340,6 @@ fn print_help(prog: []const u8) void {
 
 fn sout(comptime format: []const u8, args: anytype) void {
     const stdout = std.io.getStdOut().writer();
-    stdout.print(format, args) catch |err| switch (err) {
-        else => std.log.info("sout: {}", .{ err }),
-    };
-}
-
-fn serr(comptime format: []const u8, args: anytype) void {
-    const stderr = std.io.getStdErr().writer();
-    stderr.print(format, args) catch |err| switch (err) {
-        else => std.log.info("serr: {}", .{ err }),
-    };
+    stdout.print(format, args) catch |err|
+        soutLog.err("sout: {}", .{ err });
 }
