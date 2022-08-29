@@ -67,7 +67,9 @@ pub fn main() anyerror!void {
     defer thisLog.debug("leaked: {}", .{ gpa.deinit() });
     const malloc = gpa.allocator();
 
-    const argv = try getArgv(malloc);
+    var argIter = try process.argsWithAllocator(malloc);
+    defer argIter.deinit();
+    const argv = try getArgv(&argIter, malloc);
     defer malloc.free(argv);
 
     if ( argv.len <= 1 ) {
@@ -111,43 +113,41 @@ pub fn main() anyerror!void {
     }
 
     const cwd = std.fs.cwd();
-    var dir = cwd.openDir(input_file_name, .{
-        .access_sub_paths = true, .iterate = true,
+    var itdir = cwd.openIterableDir(input_file_name, .{
+        .access_sub_paths = true,
     }) catch |err| switch (err) {
             error.NotDir => {
                 try doAction(action, cwd, input_file_name, malloc);
                 os.exit(0);
             },
             else => {
-                thisLog.err("unhandled error: {s}", .{ err });
+                thisLog.err("unhandled error: {}", .{ err });
                 return;
             },
     };
-    defer dir.close();
+    defer itdir.close();
 
-    try traverse(dir, action, malloc);
+    try traverse(itdir, action, malloc);
 
     os.exit(0);
 }
 
-fn traverse(dir: fs.Dir, action: Action,
+fn traverse(itdir: fs.IterableDir, action: Action,
             alloc: std.mem.Allocator) anyerror!void {
     if ( flags.verbose )
         verboseLog.info("Traversing a directory", .{});
 
-    var iter = dir.iterate();
+    var iter = itdir.iterate();
     while ( try iter.next() ) |entry| {
         const name = entry.name;
         if ( std.mem.eql(u8, temp_file_name, name) ) continue;
         switch ( entry.kind ) {
             .Directory => {
-                var new_dir = try dir.openDir(name, .{
-                    .access_sub_paths = true, .iterate = true,
-                });
-                defer new_dir.close();
-                try traverse(new_dir, action, alloc);
+                var new_itdir = try itdir.dir.openIterableDir(name, .{});
+                defer new_itdir.close();
+                try traverse(new_itdir, action, alloc);
             },
-            .File => try doAction(action, dir, name, alloc),
+            .File => try doAction(action, itdir.dir, name, alloc),
             else  => {},
         }
     }
@@ -178,9 +178,9 @@ fn doAction(action: Action, dir: fs.Dir,
 fn actOnTemp(action: Action, dir: fs.Dir,
             input_file_name: []const u8,
             alloc: std.mem.Allocator) !void {
-    const fin = dir.openFile(input_file_name, .{ .read = true }) catch
+    const fin = dir.openFile(input_file_name, .{}) catch
         |err| {
-            thisLog.err("Couldn't open file {s}: {s}",
+            thisLog.err("Couldn't open file {s}: {}",
                 .{ input_file_name, err });
             os.exit(1);
     };
@@ -288,33 +288,26 @@ fn actOnBuffer(action: Action, lastc: ?u8, isLastBuffer: bool,
     }
 }
 
-fn getArgc(alloc: std.mem.Allocator) usize {
-    var argIter = process.args();
+fn getArgc(alloc: std.mem.Allocator) !usize {
+    var argIter = try process.argsWithAllocator(alloc);
+    defer argIter.deinit();
     var argc: usize = 0;
-    while ( nextArg(&argIter, alloc) ) |_| {
+    while ( argIter.next() ) |_| {
         argc += 1;
     }
     return argc;
 }
 
-fn getArgv(alloc: std.mem.Allocator) ![][]const u8 {
-    var argIter = process.args();
-    const argc = getArgc(alloc);
+fn getArgv(argIter: *process.ArgIterator,
+        alloc: std.mem.Allocator) ![][]const u8 {
+    const argc = try getArgc(alloc);
     const argv = try alloc.alloc([]const u8, argc);
     var i: u8 = 0;
-    while ( nextArg(&argIter, alloc) ) |arg| {
+    while ( argIter.next() ) |arg| {
         argv[i] = arg;
         i += 1;
     }
     return argv;
-}
-
-fn nextArg(argIter: *process.ArgIterator,
-            alloc: std.mem.Allocator) ?[]u8 {
-    return argIter.next(alloc) catch |err| blk: {
-        thisLog.err("Found err: {}", .{ err });
-        break :blk null;
-    };
 }
 
 fn print_help(prog: []const u8) void {
