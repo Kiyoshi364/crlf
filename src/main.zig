@@ -22,7 +22,7 @@ pub fn log(
     args: anytype,
 ) void {
     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
-    const prefix = "[" ++ level.asText() ++ "] " ++ scope_prefix;
+    const prefix = "[" ++ comptime level.asText() ++ "] " ++ scope_prefix;
 
     // Print the message to stderr, silently ignoring any errors
     std.debug.getStderrMutex().lock();
@@ -209,7 +209,7 @@ fn copyWithAction(action: Action, fin: fs.File, fout: fs.File,
             alloc: std.mem.Allocator) !void {
     const fit_in_memory = fin.readToEndAlloc(alloc, 0xFF_FF_FF_FF) catch
         |err| switch (err) {
-            error.FileTooBig => null,
+            error.FileTooBig => @as(?[]const u8, null),
             else => return err,
     };
 
