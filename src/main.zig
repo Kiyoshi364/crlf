@@ -41,7 +41,7 @@ var flags = struct {
     pub fn status(self: Self, comptime logger: anytype) void {
         const fields = @typeInfo(Self).Struct.fields;
         inline for (fields) |field| {
-            if ( field.field_type != bool )
+            if ( field.type != bool )
                 @compileError(@typeName(Self) ++ "has a non-bool field.");
             if ( @field(self, field.name) ) {
                 logger.info("flag: " ++ field.name ++ "", .{});
@@ -80,7 +80,7 @@ pub fn main() anyerror!void {
     var input_file_name: []const u8 = undefined;
     var action: Action = .toCRLF;
     var help: bool = false;
-    for ( argv ) |arg, i| {
+    for ( argv, 0.. ) |arg, i| {
         // TODO: better argument parsing
         if ( i == 0 ) continue
         else if ( std.mem.eql(u8, arg, "--help")
@@ -142,12 +142,12 @@ fn traverse(itdir: fs.IterableDir, action: Action,
         const name = entry.name;
         if ( std.mem.eql(u8, temp_file_name, name) ) continue;
         switch ( entry.kind ) {
-            .Directory => {
+            .directory => {
                 var new_itdir = try itdir.dir.openIterableDir(name, .{});
                 defer new_itdir.close();
                 try traverse(new_itdir, action, alloc);
             },
-            .File => try doAction(action, itdir.dir, name, alloc),
+            .file => try doAction(action, itdir.dir, name, alloc),
             else  => {},
         }
     }
@@ -166,7 +166,7 @@ fn doAction(action: Action, dir: fs.Dir,
     if ( flags.mk_backup ) {
         const backup_name = try alloc.alloc(u8, input_file_name.len + 1);
         defer alloc.free(backup_name);
-        for ( input_file_name ) |c, i| {
+        for ( input_file_name, 0.. ) |c, i| {
             backup_name[i] = c;
         }
         backup_name[input_file_name.len] = '~';
