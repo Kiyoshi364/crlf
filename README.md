@@ -5,6 +5,6 @@ Converts file or directory subtree from linux to windows text file format or the
 
 ```console
 $ zig version
-0.11.0
+0.12.1
 $ zig build
 ```

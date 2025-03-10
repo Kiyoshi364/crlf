@@ -1,6 +1,6 @@
 const std = @import("std");
 const process = std.process;
-const os = std.os;
+const posix = std.posix;
 const fs = std.fs;
 
 pub const log_level: std.log.Level = .debug;
@@ -74,7 +74,7 @@ pub fn main() anyerror!void {
 
     if ( argv.len <= 1 ) {
         thisLog.warn("no arguments", .{});
-        os.exit(0);
+        posix.exit(0);
     }
 
     var input_file_name: []const u8 = undefined;
@@ -103,7 +103,7 @@ pub fn main() anyerror!void {
 
     if ( help ) {
         print_help(argv[0]);
-        os.exit(0);
+        posix.exit(0);
     }
 
     if ( flags.verbose ) {
@@ -113,41 +113,42 @@ pub fn main() anyerror!void {
     }
 
     const cwd = std.fs.cwd();
-    var itdir = cwd.openIterableDir(input_file_name, .{
-        .access_sub_paths = true,
-    }) catch |err| switch (err) {
+    var dir = cwd.openDir(
+        input_file_name,
+        .{.iterate = true},
+    ) catch |err| switch (err) {
             error.NotDir => {
                 try doAction(action, cwd, input_file_name, malloc);
-                os.exit(0);
+                posix.exit(0);
             },
             else => {
                 thisLog.err("unhandled error: {}", .{ err });
                 return;
             },
     };
-    defer itdir.close();
+    defer dir.close();
 
-    try traverse(itdir, action, malloc);
+    try traverse(dir, action, malloc);
 
-    os.exit(0);
+    posix.exit(0);
 }
 
-fn traverse(itdir: fs.IterableDir, action: Action,
+fn traverse(dir: fs.Dir, action: Action,
             alloc: std.mem.Allocator) anyerror!void {
     if ( flags.verbose )
         verboseLog.info("Traversing a directory", .{});
 
-    var iter = itdir.iterate();
+    var iter = dir.iterate();
     while ( try iter.next() ) |entry| {
         const name = entry.name;
         if ( std.mem.eql(u8, temp_file_name, name) ) continue;
         switch ( entry.kind ) {
             .directory => {
-                var new_itdir = try itdir.dir.openIterableDir(name, .{});
-                defer new_itdir.close();
-                try traverse(new_itdir, action, alloc);
+                var new_dir = try dir.openDir(name, .{.iterate = true});
+                defer new_dir.close();
+                try traverse(new_dir, action, alloc);
             },
-            .file => try doAction(action, itdir.dir, name, alloc),
+            .file => try doAction(action, dir, name, alloc),
             else  => {},
         }
     }
@@ -182,7 +183,7 @@ fn actOnTemp(action: Action, dir: fs.Dir,
         |err| {
             thisLog.err("Couldn't open file {s}: {}",
                 .{ input_file_name, err });
-            os.exit(1);
+            posix.exit(1);
     };
     defer fin.close();
 
